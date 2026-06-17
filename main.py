@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # НАСТРОЙКИ
 # ============================================================================
-BOT_TOKEN = "8756754281:AAG5A5shKgGa-LjRQHNYpTqL0T87aDBT3mA"
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMIN_ID = 5023137327
 
 bot = Bot(token=BOT_TOKEN)
