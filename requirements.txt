@@ -1,2 +1,2 @@
-aiogra
+aiogram
 aiohttp
