@@ -460,8 +460,6 @@ async def show_main_menu(message_or_callback):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📅 Записаться", callback_data="start_booking")],
         [InlineKeyboardButton(text="📋 Мои записи", callback_data="my_bookings")],
-        [InlineKeyboardButton(text="👩‍🎨 О мастере", callback_data="about_master")],
-        [InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")],
         [InlineKeyboardButton(text="❗ Противопоказания", callback_data="contraindications_info")],
         [InlineKeyboardButton(text="📍 Как добраться", callback_data="how_to_get")]
     ])
