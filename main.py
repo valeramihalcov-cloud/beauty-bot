@@ -397,7 +397,6 @@ async def show_main_menu(message_or_callback):
         [InlineKeyboardButton(text="📍 Как добраться", callback_data="how_to_get")]
     ])
     
-    # Для мастера добавляем кнопку панели
     if isinstance(message_or_callback, types.CallbackQuery):
         if message_or_callback.from_user.id == ADMIN_ID:
             keyboard.inline_keyboard.append([
@@ -861,7 +860,6 @@ async def admin_cancel_booking(callback_query: types.CallbackQuery, state: FSMCo
             f"✅ Запись отменена:\n{booking_to_cancel.get('name', '')} - {date_display} {time_str}"
         )
         
-        # Перезагружаем админ-панель
         await callback_query.message.delete()
         await admin_panel(callback_query, state)
         
@@ -878,7 +876,7 @@ async def back_to_menu(callback_query: types.CallbackQuery, state: FSMContext):
         logger.error(f"Ошибка возврата в меню: {e}")
 
 # ============================================================================
-# НАЧАЛО ЗАПИСИ С ПРОВЕРКОЙ ВЕРИФИКАЦИИ
+# НАЧАЛО ЗАПИСИ
 # ============================================================================
 @dp.callback_query(lambda c: c.data == 'start_booking')
 async def process_start_booking(callback_query: types.CallbackQuery, state: FSMContext):
@@ -887,7 +885,6 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
         verified_user = get_verified_user(user_id)
         
         if verified_user:
-            # Пользователь уже верифицирован
             await state.update_data(
                 name=verified_user["name"],
                 phone=verified_user["phone"]
@@ -895,9 +892,9 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
             await state.set_state(BookingState.waiting_for_service)
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❄️ Холодное восстановление — 80 BYN", callback_data="service_cold_restoration")],
-                [InlineKeyboardButton(text="✨ Кератин / Ботокс — 150 BYN", callback_data="service_keratin_botox")],
-                [InlineKeyboardButton(text="💎 Тотальная реконструкция — 200 BYN", callback_data="service_total_reconstruction")],
+                [InlineKeyboardButton(text="❄️ Холодное восстановление — 80 BYN (2.5 ч)", callback_data="service_cold_restoration")],
+                [InlineKeyboardButton(text="✨ Кератин / Ботокс — 150 BYN (4 ч)", callback_data="service_keratin_botox")],
+                [InlineKeyboardButton(text="💎 Тотальная реконструкция — 200 BYN (5 ч)", callback_data="service_total_reconstruction")],
                 [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
             ])
             
@@ -909,10 +906,8 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
                 parse_mode="HTML"
             )
         else:
-            # Пользователь не верифицирован - запрашиваем контакт через ОБЫЧНУЮ клавиатуру
             await state.set_state(BookingState.waiting_for_contact)
             
-            # ⚠️ ВАЖНО: Используем ReplyKeyboardMarkup + KeyboardButton, а не InlineKeyboardButton!
             contact_keyboard = ReplyKeyboardMarkup(
                 keyboard=[
                     [KeyboardButton(text="📱 Поделиться контактом", request_contact=True)],
@@ -939,12 +934,9 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
 
 @dp.message(BookingState.waiting_for_contact)
 async def process_contact(message: types.Message, state: FSMContext):
-    """Обработка полученного контакта"""
     try:
-        # Убираем обычную клавиатуру
         await message.answer("...", reply_markup=ReplyKeyboardRemove())
         
-        # Проверяем, не нажал ли пользователь "Отмена"
         if message.text and "Отмена" in message.text:
             await state.clear()
             await show_main_menu(message)
@@ -965,7 +957,6 @@ async def process_contact(message: types.Message, state: FSMContext):
         if contact.last_name:
             name = f"{contact.first_name} {contact.last_name}"
         
-        # Сохраняем верифицированного пользователя
         save_verified_user(message.from_user.id, name, phone)
         
         await state.update_data(name=name, phone=phone)
@@ -1002,7 +993,6 @@ async def process_service(callback_query: types.CallbackQuery, state: FSMContext
         data = load_data()
         user_bookings = [b for b in data.get("bookings", []) if b.get("user_id") == user_id]
         
-        # Если у пользователя уже есть 2+ записи - предупреждаем мастера
         if len(user_bookings) >= 2:
             user_data = await state.get_data()
             alert_text = (
@@ -1121,7 +1111,7 @@ async def process_date(callback_query: types.CallbackQuery, state: FSMContext):
         logger.error(f"Ошибка выбора даты: {e}")
 
 # ============================================================================
-# ВЫБОР ВРЕМЕНИ
+# ВЫБОР ВРЕМЕНИ (С КНОПКОЙ "В МЕНЮ")
 # ============================================================================
 @dp.callback_query(lambda c: c.data.startswith('time_'))
 async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
@@ -1209,14 +1199,19 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
             f"<i>Ждём вас! ✨</i>"
         )
         
+        # 🆕 Клавиатура с кнопкой "В меню"
+        final_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_menu")]
+        ])
+        
         await state.clear()
         await send_bot_message(
             callback_query.from_user.id,
             callback_query.message.chat.id,
             final_message,
+            reply_markup=final_keyboard,
             parse_mode="HTML"
         )
-        await show_main_menu(callback_query)
         await safe_answer(callback_query)
     except Exception as e:
         logger.error(f"Ошибка выбора времени: {e}")
@@ -1279,7 +1274,7 @@ async def show_my_bookings(callback_query: types.CallbackQuery, state: FSMContex
         logger.error(f"Ошибка показа записей: {e}")
 
 # ============================================================================
-# ОТМЕНА ЗАПИСИ КЛИЕНТОМ
+# ОТМЕНА ЗАПИСИ
 # ============================================================================
 @dp.callback_query(lambda c: c.data == 'cancel_booking')
 async def start_cancellation(callback_query: types.CallbackQuery, state: FSMContext):
@@ -1473,14 +1468,13 @@ async def cmd_start(message: types.Message, state: FSMContext):
 async def show_menu_on_any_message(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     
-    # Если пользователь в процессе верификации - не перехватываем
     if current_state is not None:
         return
     
     await show_main_menu(message)
 
 # ============================================================================
-# ЗДОРОВЬЕ СЕРВИСА (для Render.com)
+# ЗДОРОВЬЕ СЕРВИСА
 # ============================================================================
 async def health_check(request):
     return web.Response(text="OK")
