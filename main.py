@@ -49,11 +49,41 @@ booking_lock = asyncio.Lock()
 # ============================================================================
 YANDEX_MAPS_URL = "https://yandex.by/maps/?text=Жлобин, ул. Матросова, 39"
 INSTAGRAM_URL = "https://instagram.com/_novakeratin"
+TELEGRAM_USERNAME = "@_novakeratin"
+TELEGRAM_LINK = "https://t.me/_novakeratin"
 
 # ============================================================================
-# УПРАВЛЕНИЕ СООБЩЕНИЯМИ (список ID для каждого пользователя)
+# УПРАВЛЕНИЕ СООБЩЕНИЯМИ (с сохранением в файл)
 # ============================================================================
 user_messages = {}  # {user_id: [message_id_1, message_id_2, ...]}
+
+def load_user_messages():
+    """Загружает список ID сообщений из файла"""
+    try:
+        filename = "user_messages.json"
+        if os.path.exists(filename):
+            with open(filename, "r", encoding="utf-8") as file:
+                data = json.load(file)
+                # Преобразуем ключи из строк в числа
+                return {int(k): v for k, v in data.items()}
+        return {}
+    except Exception as e:
+        logger.error(f"Ошибка загрузки user_messages: {e}")
+        return {}
+
+def save_user_messages():
+    """Сохраняет список ID сообщений в файл"""
+    try:
+        filename = "user_messages.json"
+        # Преобразуем ключи из чисел в строки для JSON
+        data = {str(k): v for k, v in user_messages.items()}
+        with open(filename, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Ошибка сохранения user_messages: {e}")
+
+# Загружаем сообщения при запуске
+user_messages = load_user_messages()
 
 async def send_bot_message(user_id, chat_id, text, reply_markup=None, parse_mode=None):
     try:
@@ -66,6 +96,7 @@ async def send_bot_message(user_id, chat_id, text, reply_markup=None, parse_mode
         if user_id not in user_messages:
             user_messages[user_id] = []
         user_messages[user_id].append(msg.message_id)
+        save_user_messages()  # Сохраняем после каждого сообщения
         return msg
     except Exception as e:
         logger.error(f"Ошибка отправки сообщения: {e}")
@@ -92,6 +123,8 @@ async def cleanup_previous_messages(user_id, chat_id, keep_message_id=None):
             logger.debug(f"Не удалось удалить сообщение {msg_id}: {e}")
         
         await asyncio.sleep(0.05)
+    
+    save_user_messages()  # Сохраняем после очистки
 
 # ============================================================================
 # БЕЗОПАСНЫЕ ОБЁРТКИ
@@ -409,7 +442,19 @@ class BookingState(StatesGroup):
     waiting_for_time = State()
 
 # ============================================================================
-# ГЛАВНОЕ МЕНЮ (с очисткой предыдущих сообщений)
+# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: Кнопка меню для всех экранов
+# ============================================================================
+def get_menu_button():
+    """Возвращает кнопку 'Меню' для добавления в любую клавиатуру"""
+    return InlineKeyboardButton(text="🏠 Меню", callback_data="back_to_menu")
+
+def add_menu_button(keyboard):
+    """Добавляет кнопку меню в конец клавиатуры"""
+    keyboard.inline_keyboard.append([get_menu_button()])
+    return keyboard
+
+# ============================================================================
+# ГЛАВНОЕ МЕНЮ
 # ============================================================================
 async def show_main_menu(message_or_callback):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -417,14 +462,14 @@ async def show_main_menu(message_or_callback):
         [InlineKeyboardButton(text="📋 Мои записи", callback_data="my_bookings")],
         [InlineKeyboardButton(text="👩‍🎨 О мастере", callback_data="about_master")],
         [InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")],
-        [InlineKeyboardButton(text=" Противопоказания", callback_data="contraindications_info")],
-        [InlineKeyboardButton(text=" Как добраться", callback_data="how_to_get")]
+        [InlineKeyboardButton(text="❗ Противопоказания", callback_data="contraindications_info")],
+        [InlineKeyboardButton(text="📍 Как добраться", callback_data="how_to_get")]
     ])
     
     if isinstance(message_or_callback, types.CallbackQuery):
         if message_or_callback.from_user.id == ADMIN_ID:
             keyboard.inline_keyboard.append([
-                InlineKeyboardButton(text="👨‍ Панель мастера", callback_data="admin_panel")
+                InlineKeyboardButton(text="👨‍💼 Панель мастера", callback_data="admin_panel")
             ])
     elif isinstance(message_or_callback, types.Message):
         if message_or_callback.from_user.id == ADMIN_ID:
@@ -434,7 +479,7 @@ async def show_main_menu(message_or_callback):
     
     text = (
         f"✨ <b>Добро пожаловать в Nova Keratin!</b>\n\n"
-        f"👩‍🎨 <b>Мастер Мария</b>\n"
+        f"👩🎨 <b>Мастер Мария</b>\n"
         f"📍 Жлобин, ул. Матросова, 39\n"
         f"⏰ Работаю Сб-Вс, 9:00-17:00\n\n"
         f"Выберите действие:"
@@ -449,7 +494,9 @@ async def show_main_menu(message_or_callback):
         if user_id not in user_messages:
             user_messages[user_id] = []
         user_messages[user_id].append(msg.message_id)
+        save_user_messages()
         
+        # Удаляем все предыдущие сообщения, КРОМЕ только что созданного меню
         await cleanup_previous_messages(user_id, chat_id, keep_message_id=msg.message_id)
     else:
         user_id = message_or_callback.from_user.id
@@ -461,15 +508,18 @@ async def show_main_menu(message_or_callback):
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
+            # При редактировании оставляем только текущее сообщение
             if user_id in user_messages:
                 user_messages[user_id] = [message_or_callback.message.message_id]
             else:
                 user_messages[user_id] = [message_or_callback.message.message_id]
+            save_user_messages()
         except Exception as e:
             msg = await message_or_callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
             if user_id not in user_messages:
                 user_messages[user_id] = []
             user_messages[user_id].append(msg.message_id)
+            save_user_messages()
             await cleanup_previous_messages(user_id, chat_id, keep_message_id=msg.message_id)
 
 # ============================================================================
@@ -571,7 +621,7 @@ async def send_client_reminder(booking):
             f"Завтра мы ждём вас:\n\n"
             f"📅 {date_display}\n"
             f"⏰ {booking.get('time', '')}\n"
-            f"💆‍♀️ {service_name}\n\n"
+            f"‍♀️ {service_name}\n\n"
             f"📍 <b>Адрес:</b>\nул. Матросова, 39, 1 этаж\n\n"
             f"<i>Если планы изменились — отмените запись в боте</i>"
         )
@@ -597,10 +647,10 @@ async def send_admin_reminder(booking):
         text = (
             f"⏰ <b>Скоро запись</b>\n\n"
             f"Через 2 часа:\n\n"
-            f" <b>{booking.get('name', 'Неизвестно')}</b>\n"
-            f" {booking.get('phone', '')}\n"
+            f"👤 <b>{booking.get('name', 'Неизвестно')}</b>\n"
+            f"📞 {booking.get('phone', '')}\n"
             f"📅 {date_display}\n"
-            f"⏰ {booking.get('time', '')} — {end_time}\n"
+            f" {booking.get('time', '')} — {end_time}\n"
             f"💆‍♀️ {service_name}\n\n"
             f"📍 ул. Матросова, 39, 1 этаж"
         )
@@ -611,10 +661,10 @@ async def send_admin_reminder(booking):
         
         await safe_send_message(ADMIN_ID, text, parse_mode="HTML", reply_markup=keyboard)
     except Exception as e:
-        logger.error(f"❌ Ошибка напоминания мастеру: {e}")
+        logger.error(f" Ошибка напоминания мастеру: {e}")
 
 # ============================================================================
-# ИНФОРМАЦИОННЫЕ КНОПКИ
+# ИНФОРМАЦИОННЫЕ КНОПКИ (с кнопкой меню и рабочими ссылками)
 # ============================================================================
 @dp.callback_query(lambda c: c.data == 'about_master')
 async def about_master(callback_query: types.CallbackQuery, state: FSMContext):
@@ -625,7 +675,7 @@ async def about_master(callback_query: types.CallbackQuery, state: FSMContext):
             f"✨ <b>Опыт работы:</b> более 3 лет\n"
             f"🎓 <b>Образование:</b> профессиональные курсы по кератиновому выпрямлению и восстановлению волос\n"
             f"💎 <b>Специализация:</b> все виды реконструкции волос\n\n"
-            f"📸 <b>Портфолио работ:</b>\n@_novakeratin\n\n"
+            f"📸 <b>Портфолио работ:</b>\n<a href='{TELEGRAM_LINK}'>{TELEGRAM_USERNAME}</a>\n\n"
             f"📍 <b>Адрес:</b> ул. Матросова, 39, 1 этаж (Жлобин)\n"
             f"⏰ <b>Время работы:</b> Суббота и Воскресенье, 9:00-17:00"
         )
@@ -633,6 +683,7 @@ async def about_master(callback_query: types.CallbackQuery, state: FSMContext):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
         ])
+        keyboard = add_menu_button(keyboard)
         
         await send_bot_message(
             callback_query.from_user.id,
@@ -654,13 +705,14 @@ async def reviews(callback_query: types.CallbackQuery, state: FSMContext):
             f"📸 <b>Смотрите фото работ и отзывы в Instagram:</b>\n"
             f"@_novakeratin\n\n"
             f"💬 <b>Или напишите мастеру напрямую:</b>\n"
-            f"@_novakeratin"
+            f"<a href='{TELEGRAM_LINK}'>{TELEGRAM_USERNAME}</a>"
         )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📸 Открыть Instagram", url=INSTAGRAM_URL)],
             [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
         ])
+        keyboard = add_menu_button(keyboard)
         
         await send_bot_message(
             callback_query.from_user.id,
@@ -694,13 +746,14 @@ async def contraindications_info(callback_query: types.CallbackQuery, state: FSM
             f"4. Повышенная слезоточивость\n"
             f"5. Дети до 18 лет\n\n"
             f"❗ Если у вас есть что-то из перечисленного, проконсультируйтесь с мастером перед записью!\n\n"
-            f"📞 <b>Консультация:</b> @_novakeratin"
+            f"📞 <b>Консультация:</b> <a href='{TELEGRAM_LINK}'>{TELEGRAM_USERNAME}</a>"
         )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📅 Записаться", callback_data="start_booking")],
             [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
         ])
+        keyboard = add_menu_button(keyboard)
         
         await send_bot_message(
             callback_query.from_user.id,
@@ -726,7 +779,7 @@ async def how_to_get(callback_query: types.CallbackQuery, state: FSMContext):
             f"🕐 <b>Время работы:</b>\n"
             f"Суббота и Воскресенье\n"
             f"9:00 — 17:00\n\n"
-            f" <b>Instagram:</b>\n"
+            f"📸 <b>Instagram:</b>\n"
             f"@_novakeratin"
         )
         
@@ -734,6 +787,7 @@ async def how_to_get(callback_query: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="🗺️ Открыть в Яндекс.Картах", url=YANDEX_MAPS_URL)],
             [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
         ])
+        keyboard = add_menu_button(keyboard)
         
         await send_bot_message(
             callback_query.from_user.id,
@@ -841,7 +895,7 @@ async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
 async def admin_cancel_booking(callback_query: types.CallbackQuery, state: FSMContext):
     try:
         if callback_query.from_user.id != ADMIN_ID:
-            await safe_answer(callback_query, " Только для мастера", show_alert=True)
+            await safe_answer(callback_query, "⛔ Только для мастера", show_alert=True)
             return
         
         parts = callback_query.data.split('_')
@@ -874,7 +928,8 @@ async def admin_cancel_booking(callback_query: types.CallbackQuery, state: FSMCo
         try:
             await safe_send_message(
                 booking_to_cancel["user_id"],
-                f"⚠️ Ваша запись на {date_display} в {time_str} была отменена мастером.\n\nПриносим извинения за неудобства. Пожалуйста, свяжитесь с мастером для уточнения деталей: @_novakeratin"
+                f"⚠️ Ваша запись на {date_display} в {time_str} была отменена мастером.\n\nПриносим извинения за неудобства. Пожалуйста, свяжитесь с мастером для уточнения деталей: <a href='{TELEGRAM_LINK}'>{TELEGRAM_USERNAME}</a>",
+                parse_mode="HTML"
             )
         except Exception as e:
             logger.error(f"Не удалось уведомить клиента об отмене: {e}")
@@ -898,17 +953,25 @@ async def back_to_menu(callback_query: types.CallbackQuery, state: FSMContext):
         user_id = callback_query.from_user.id
         chat_id = callback_query.message.chat.id
         
+        # Удаляем текущее сообщение
         try:
             await callback_query.message.delete()
             if user_id in user_messages and callback_query.message.message_id in user_messages[user_id]:
                 user_messages[user_id].remove(callback_query.message.message_id)
+                save_user_messages()
         except:
             pass
         
         await state.clear()
+        
+        # Показываем меню (оно добавится в список user_messages)
         await show_main_menu(callback_query)
         
-        await cleanup_previous_messages(user_id, chat_id)
+        # Теперь удаляем все остальные сообщения, КРОМЕ только что показанного меню
+        # Получаем ID последнего сообщения (меню)
+        if user_id in user_messages and len(user_messages[user_id]) > 0:
+            menu_message_id = user_messages[user_id][-1]
+            await cleanup_previous_messages(user_id, chat_id, keep_message_id=menu_message_id)
     except Exception as e:
         logger.error(f"Ошибка возврата в меню: {e}")
 
@@ -925,6 +988,7 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
             await callback_query.message.delete()
             if user_id in user_messages and callback_query.message.message_id in user_messages[user_id]:
                 user_messages[user_id].remove(callback_query.message.message_id)
+                save_user_messages()
         except:
             pass
         
@@ -938,11 +1002,12 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
             await state.set_state(BookingState.waiting_for_service)
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❄️ Холодное восстановление — 80 BYN", callback_data="service_cold_restoration")],
+                [InlineKeyboardButton(text="️ Холодное восстановление — 80 BYN", callback_data="service_cold_restoration")],
                 [InlineKeyboardButton(text="✨ Кератин / Ботокс — 150 BYN", callback_data="service_keratin_botox")],
                 [InlineKeyboardButton(text="💎 Тотальная реконструкция — 200 BYN", callback_data="service_total_reconstruction")],
                 [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
             ])
+            keyboard = add_menu_button(keyboard)
             
             await send_bot_message(
                 user_id,
@@ -988,6 +1053,7 @@ async def process_contact(message: types.Message, state: FSMContext):
             await message.delete()
             if user_id in user_messages and message.message_id in user_messages[user_id]:
                 user_messages[user_id].remove(message.message_id)
+                save_user_messages()
         except:
             pass
         
@@ -1000,7 +1066,7 @@ async def process_contact(message: types.Message, state: FSMContext):
             await send_bot_message(
                 user_id,
                 chat_id,
-                "❌ Пожалуйста, нажмите кнопку « Поделиться контактом» для подтверждения номера телефона."
+                "❌ Пожалуйста, нажмите кнопку «📱 Поделиться контактом» для подтверждения номера телефона."
             )
             return
         
@@ -1022,6 +1088,7 @@ async def process_contact(message: types.Message, state: FSMContext):
             [InlineKeyboardButton(text="💎 Тотальная реконструкция — 200 BYN", callback_data="service_total_reconstruction")],
             [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
         ])
+        keyboard = add_menu_button(keyboard)
         
         await send_bot_message(
             user_id,
@@ -1102,12 +1169,14 @@ async def process_service(callback_query: types.CallbackQuery, state: FSMContext
         keyboard_buttons.append([InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        keyboard = add_menu_button(keyboard)
+        
         service_name = get_service_name(service_code)
         
         await send_bot_message(
             user_id,
             callback_query.message.chat.id,
-            f"📅 <b>{service_name}</b>\n\n💡 Мастер работает только по выходным!\n\nВыберите дату:",
+            f" <b>{service_name}</b>\n\n💡 Мастер работает только по выходным!\n\nВыберите дату:",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
@@ -1150,9 +1219,10 @@ async def process_date(callback_query: types.CallbackQuery, state: FSMContext):
         for time_str in sorted(free_times):
             keyboard_buttons.append([InlineKeyboardButton(text=time_str, callback_data=f"time_{time_str}")])
         
-        keyboard_buttons.append([InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")])
+        keyboard_buttons.append([InlineKeyboardButton(text=" Назад", callback_data="back_to_menu")])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        keyboard = add_menu_button(keyboard)
         
         await send_bot_message(
             callback_query.from_user.id,
@@ -1191,7 +1261,7 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
                 await send_bot_message(
                     callback_query.from_user.id,
                     callback_query.message.chat.id,
-                    " К сожалению, этот слот только что заняли. Пожалуйста, выберите другое время."
+                    "⏰ К сожалению, этот слот только что заняли. Пожалуйста, выберите другое время."
                 )
                 await safe_answer(callback_query)
                 return
@@ -1222,9 +1292,9 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
         admin_text = (
             f"🔔 <b>Новая запись</b>\n\n"
             f"👤 <b>{user_data.get('name', '')}</b>\n"
-            f"📞 {user_data.get('phone', '')}\n"
+            f" {user_data.get('phone', '')}\n"
             f"📅 {format_date_full_ru(date_str)}\n"
-            f"⏰ {time_str}\n"
+            f" {time_str}\n"
             f"💆‍♀️ {service_name}\n"
             f"💰 {price} BYN"
         )
@@ -1244,11 +1314,11 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
             f"Отлично, <b>{user_data.get('name', '')}</b>! ✨\n\n"
             f"Вы записаны на:\n"
             f"💆‍♀️ {service_name}\n\n"
-            f"📅 {date_display}\n"
+            f" {date_display}\n"
             f"⏰ {time_str} — {end_time}\n"
             f"💰 {price} BYN\n\n"
             f"📍 <b>Адрес:</b>\nул. Матросова, 39, 1 этаж\n(напротив Светофор, Мастак)\n\n"
-            f"📞 <b>Контакты:</b>\nInstagram: @_novakeratin\n\n"
+            f"📞 <b>Контакты:</b>\n<a href='{TELEGRAM_LINK}'>{TELEGRAM_USERNAME}</a>\n\n"
             f"🔔 Мы напомним вам о записи за 24 часа до визита.\n\n"
             f"<i>Ждём вас! ✨</i>"
         )
@@ -1287,7 +1357,7 @@ async def show_my_bookings(callback_query: types.CallbackQuery, state: FSMContex
             return
         
         bookings_text = (
-            f" <b>Ваши записи</b>\n\n"
+            f"📋 <b>Ваши записи</b>\n\n"
         )
         
         for b in user_bookings:
@@ -1320,6 +1390,7 @@ async def show_my_bookings(callback_query: types.CallbackQuery, state: FSMContex
             [InlineKeyboardButton(text="❌ Отменить запись", callback_data="cancel_booking")],
             [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
         ])
+        keyboard = add_menu_button(keyboard)
         
         await send_bot_message(user_id, callback_query.message.chat.id, bookings_text, parse_mode="HTML", reply_markup=keyboard)
         await safe_answer(callback_query)
@@ -1354,6 +1425,8 @@ async def start_cancellation(callback_query: types.CallbackQuery, state: FSMCont
         keyboard_buttons.append([InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        keyboard = add_menu_button(keyboard)
+        
         await send_bot_message(user_id, callback_query.message.chat.id, "Какую запись вы хотите отменить?", reply_markup=keyboard)
         await safe_answer(callback_query)
     except Exception as e:
@@ -1450,7 +1523,7 @@ async def reschedule_booking(callback_query: types.CallbackQuery, state: FSMCont
                 await send_bot_message(
                     user_id,
                     callback_query.message.chat.id,
-                    "⏰ Это время только что заняли. Ваша запись остаётся без изменений."
+                    " Это время только что заняли. Ваша запись остаётся без изменений."
                 )
                 await show_main_menu(callback_query)
                 await safe_answer(callback_query)
