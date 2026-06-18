@@ -895,9 +895,9 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
             await state.set_state(BookingState.waiting_for_service)
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❄️ Холодное восстановление — 80 BYN (2.5 ч)", callback_data="service_cold_restoration")],
-                [InlineKeyboardButton(text="✨ Кератин / Ботокс — 150 BYN (4 ч)", callback_data="service_keratin_botox")],
-                [InlineKeyboardButton(text="💎 Тотальная реконструкция — 200 BYN (5 ч)", callback_data="service_total_reconstruction")],
+                [InlineKeyboardButton(text="❄️ Холодное восстановление — 80 BYN", callback_data="service_cold_restoration")],
+                [InlineKeyboardButton(text="✨ Кератин / Ботокс — 150 BYN", callback_data="service_keratin_botox")],
+                [InlineKeyboardButton(text="💎 Тотальная реконструкция — 200 BYN", callback_data="service_total_reconstruction")],
                 [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
             ])
             
