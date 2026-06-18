@@ -53,18 +53,16 @@ TELEGRAM_USERNAME = "@_novakeratin"
 TELEGRAM_LINK = "https://t.me/_novakeratin"
 
 # ============================================================================
-# УПРАВЛЕНИЕ СООБЩЕНИЯМИ (с сохранением в файл)
+# УПРАВЛЕНИЕ СООБЩЕНИЯМИ
 # ============================================================================
-user_messages = {}  # {user_id: [message_id_1, message_id_2, ...]}
+user_messages = {}
 
 def load_user_messages():
-    """Загружает список ID сообщений из файла"""
     try:
         filename = "user_messages.json"
         if os.path.exists(filename):
             with open(filename, "r", encoding="utf-8") as file:
                 data = json.load(file)
-                # Преобразуем ключи из строк в числа
                 return {int(k): v for k, v in data.items()}
         return {}
     except Exception as e:
@@ -72,17 +70,14 @@ def load_user_messages():
         return {}
 
 def save_user_messages():
-    """Сохраняет список ID сообщений в файл"""
     try:
         filename = "user_messages.json"
-        # Преобразуем ключи из чисел в строки для JSON
         data = {str(k): v for k, v in user_messages.items()}
         with open(filename, "w", encoding="utf-8") as file:
             json.dump(data, file, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error(f"Ошибка сохранения user_messages: {e}")
 
-# Загружаем сообщения при запуске
 user_messages = load_user_messages()
 
 async def send_bot_message(user_id, chat_id, text, reply_markup=None, parse_mode=None):
@@ -96,14 +91,13 @@ async def send_bot_message(user_id, chat_id, text, reply_markup=None, parse_mode
         if user_id not in user_messages:
             user_messages[user_id] = []
         user_messages[user_id].append(msg.message_id)
-        save_user_messages()  # Сохраняем после каждого сообщения
+        save_user_messages()
         return msg
     except Exception as e:
         logger.error(f"Ошибка отправки сообщения: {e}")
         return None
 
 async def cleanup_previous_messages(user_id, chat_id, keep_message_id=None):
-    """Удаляет все предыдущие сообщения бота для пользователя"""
     if user_id not in user_messages:
         return
     
@@ -124,7 +118,7 @@ async def cleanup_previous_messages(user_id, chat_id, keep_message_id=None):
         
         await asyncio.sleep(0.05)
     
-    save_user_messages()  # Сохраняем после очистки
+    save_user_messages()
 
 # ============================================================================
 # БЕЗОПАСНЫЕ ОБЁРТКИ
@@ -413,12 +407,81 @@ def get_verified_user(user_id):
     return verified_users.get(str(user_id))
 
 # ============================================================================
+# ПРОГРАММА ЛОЯЛЬНОСТИ
+# ============================================================================
+def load_loyalty_data():
+    """Загружает данные программы лояльности"""
+    try:
+        filename = "loyalty.json"
+        if os.path.exists(filename):
+            with open(filename, "r", encoding="utf-8") as file:
+                return json.load(file)
+        return {}
+    except Exception as e:
+        logger.error(f"Ошибка загрузки loyalty: {e}")
+        return {}
+
+def save_loyalty_data(data):
+    """Сохраняет данные программы лояльности"""
+    try:
+        filename = "loyalty.json"
+        with open(filename, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Ошибка сохранения loyalty: {e}")
+
+def get_user_visits(user_id):
+    """Получает количество посещений пользователя"""
+    loyalty = load_loyalty_data()
+    return loyalty.get(str(user_id), {}).get("visits", 0)
+
+def increment_user_visits(user_id):
+    """Увеличивает счётчик посещений пользователя"""
+    loyalty = load_loyalty_data()
+    user_id_str = str(user_id)
+    
+    if user_id_str not in loyalty:
+        loyalty[user_id_str] = {"visits": 0, "total_spent": 0}
+    
+    loyalty[user_id_str]["visits"] = loyalty[user_id_str].get("visits", 0) + 1
+    save_loyalty_data(loyalty)
+    
+    return loyalty[user_id_str]["visits"]
+
+def get_user_discount(user_id):
+    """Возвращает процент скидки для пользователя"""
+    visits = get_user_visits(user_id)
+    
+    if visits >= 5:
+        return 15
+    elif visits >= 3:
+        return 10
+    else:
+        return 0
+
+def get_discount_message(user_id):
+    """Возвращает сообщение о текущей скидке и прогрессе"""
+    visits = get_user_visits(user_id)
+    discount = get_user_discount(user_id)
+    
+    if visits >= 5:
+        return f"🎁 <b>Ваша скидка: {discount}%</b>\n\nВы наш постоянный клиент! Скидка 15% на все процедуры."
+    elif visits >= 3:
+        next_discount_at = 5
+        remaining = next_discount_at - visits
+        return f"🎁 <b>Ваша скидка: {discount}%</b>\n\nДо скидки 15% осталось ещё {remaining} визит(ов)."
+    else:
+        next_discount_at = 3
+        remaining = next_discount_at - visits
+        return f" <b>Программа лояльности</b>\n\nУ вас {visits} визит(ов).\nДо скидки 10% осталось {remaining} визит(ов).\n\n3 визита = 10% скидка\n5 визитов = 15% скидка"
+
+# ============================================================================
 # УВЕДОМЛЕНИЯ МАСТЕРУ
 # ============================================================================
 async def send_admin_notification(text):
     try:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Открыть меню", callback_data="back_to_menu")]
+            [InlineKeyboardButton(text=" Открыть меню", callback_data="back_to_menu")]
         ])
         await safe_send_message(ADMIN_ID, text, parse_mode="HTML", reply_markup=keyboard)
         logger.info("Уведомление отправлено мастеру")
@@ -441,25 +504,28 @@ class BookingState(StatesGroup):
     waiting_for_date = State()
     waiting_for_time = State()
 
+class ReviewState(StatesGroup):
+    waiting_for_rating = State()
+    waiting_for_review_text = State()
+
 # ============================================================================
-# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: Кнопка меню для всех экранов
+# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: Кнопка меню
 # ============================================================================
 def get_menu_button():
-    """Возвращает кнопку 'Меню' для добавления в любую клавиатуру"""
     return InlineKeyboardButton(text="🏠 Меню", callback_data="back_to_menu")
 
 def add_menu_button(keyboard):
-    """Добавляет кнопку меню в конец клавиатуры"""
     keyboard.inline_keyboard.append([get_menu_button()])
     return keyboard
 
 # ============================================================================
-# ГЛАВНОЕ МЕНЮ
+# ГЛАВНОЕ МЕНЮ (с новой кнопкой FAQ)
 # ============================================================================
 async def show_main_menu(message_or_callback):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📅 Записаться", callback_data="start_booking")],
         [InlineKeyboardButton(text="📋 Мои записи", callback_data="my_bookings")],
+        [InlineKeyboardButton(text="❓ Частые вопросы", callback_data="faq")],  # НОВАЯ КНОПКА
         [InlineKeyboardButton(text="❗ Противопоказания", callback_data="contraindications_info")],
         [InlineKeyboardButton(text="📍 Как добраться", callback_data="how_to_get")]
     ])
@@ -477,7 +543,7 @@ async def show_main_menu(message_or_callback):
     
     text = (
         f"✨ <b>Добро пожаловать в Nova Keratin!</b>\n\n"
-        f"👩🎨 <b>Мастер Мария</b>\n"
+        f"👩‍🎨 <b>Мастер Мария</b>\n"
         f"📍 Жлобин, ул. Матросова, 39\n"
         f"⏰ Работаю Сб-Вс, 9:00-17:00\n\n"
         f"Выберите действие:"
@@ -494,7 +560,6 @@ async def show_main_menu(message_or_callback):
         user_messages[user_id].append(msg.message_id)
         save_user_messages()
         
-        # Удаляем все предыдущие сообщения, КРОМЕ только что созданного меню
         await cleanup_previous_messages(user_id, chat_id, keep_message_id=msg.message_id)
     else:
         user_id = message_or_callback.from_user.id
@@ -506,7 +571,6 @@ async def show_main_menu(message_or_callback):
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
-            # При редактировании оставляем только текущее сообщение
             if user_id in user_messages:
                 user_messages[user_id] = [message_or_callback.message.message_id]
             else:
@@ -566,13 +630,14 @@ def save_data(data):
         logger.error(f"Ошибка сохранения данных: {e}")
 
 # ============================================================================
-# НАПОМИНАНИЯ
+# НАПОМИНАНИЯ (включая сбор отзывов)
 # ============================================================================
 async def reminder_task():
     logger.info("🔔 Задача напоминаний запущена!")
     while True:
         try:
             await check_and_send_reminders()
+            await check_and_send_review_requests()  # НОВАЯ ФУНКЦИЯ
         except Exception as e:
             logger.error(f"❌ Ошибка в задаче напоминаний: {e}")
         await asyncio.sleep(60)
@@ -608,6 +673,62 @@ async def check_and_send_reminders():
     except Exception as e:
         logger.error(f"Ошибка проверки напоминаний: {e}")
 
+async def check_and_send_review_requests():
+    """Отправляет запрос отзыва через 3 часа после окончания записи"""
+    try:
+        data = load_data()
+        now = datetime.now()
+        
+        for b in data.get("bookings", []):
+            if "user_id" not in b:
+                continue
+            
+            if b.get("review_requested", False):
+                continue
+            
+            try:
+                dt = datetime.strptime(f"{b.get('date', '')} {b.get('time', '')}", "%Y-%m-%d %H:%M")
+                duration = get_service_duration(b.get("service", ""))
+                end_dt = dt + timedelta(hours=duration)
+                
+                hours_after = (now - end_dt).total_seconds() / 3600
+                
+                if 3 <= hours_after <= 3.1:
+                    await send_review_request(b)
+                    b["review_requested"] = True
+                    save_data(data)
+            except:
+                continue
+    except Exception as e:
+        logger.error(f"Ошибка проверки отзывов: {e}")
+
+async def send_review_request(booking):
+    """Отправляет клиенту запрос отзыва"""
+    try:
+        text = (
+            f"⭐ <b>Как вам процедура?</b>\n\n"
+            f"Здравствуйте, <b>{booking.get('name', 'Клиент')}</b>!\n\n"
+            f"Надеемся, вам понравился визит. Пожалуйста, оцените качество услуги от 1 до 5:\n\n"
+            f"1 — 😞 Очень плохо\n"
+            f"2 — 😕 Плохо\n"
+            f"3 — 😐 Нормально\n"
+            f"4 — 😊 Хорошо\n"
+            f"5 — 🤩 Отлично"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="1", callback_data=f"review_1_{booking.get('date', '')}_{booking.get('time', '')}")],
+            [InlineKeyboardButton(text="2", callback_data=f"review_2_{booking.get('date', '')}_{booking.get('time', '')}")],
+            [InlineKeyboardButton(text="3", callback_data=f"review_3_{booking.get('date', '')}_{booking.get('time', '')}")],
+            [InlineKeyboardButton(text="4", callback_data=f"review_4_{booking.get('date', '')}_{booking.get('time', '')}")],
+            [InlineKeyboardButton(text="5", callback_data=f"review_5_{booking.get('date', '')}_{booking.get('time', '')}")]
+        ])
+        
+        await safe_send_message(booking["user_id"], text, parse_mode="HTML", reply_markup=keyboard)
+        logger.info(f"✅ Запрос отзыва отправлен клиенту {booking['user_id']}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки запроса отзыва: {e}")
+
 async def send_client_reminder(booking):
     try:
         date_display = format_date_full_ru(booking.get("date", ""))
@@ -619,7 +740,7 @@ async def send_client_reminder(booking):
             f"Завтра мы ждём вас:\n\n"
             f"📅 {date_display}\n"
             f"⏰ {booking.get('time', '')}\n"
-            f"‍♀️ {service_name}\n\n"
+            f"💆‍♀️ {service_name}\n\n"
             f"📍 <b>Адрес:</b>\nул. Матросова, 39, 1 этаж\n\n"
             f"<i>Если планы изменились — отмените запись в боте</i>"
         )
@@ -648,7 +769,7 @@ async def send_admin_reminder(booking):
             f"👤 <b>{booking.get('name', 'Неизвестно')}</b>\n"
             f"📞 {booking.get('phone', '')}\n"
             f"📅 {date_display}\n"
-            f" {booking.get('time', '')} — {end_time}\n"
+            f"⏰ {booking.get('time', '')} — {end_time}\n"
             f"💆‍♀️ {service_name}\n\n"
             f"📍 ул. Матросова, 39, 1 этаж"
         )
@@ -659,10 +780,248 @@ async def send_admin_reminder(booking):
         
         await safe_send_message(ADMIN_ID, text, parse_mode="HTML", reply_markup=keyboard)
     except Exception as e:
-        logger.error(f" Ошибка напоминания мастеру: {e}")
+        logger.error(f"❌ Ошибка напоминания мастеру: {e}")
 
 # ============================================================================
-# ИНФОРМАЦИОННЫЕ КНОПКИ (с кнопкой меню и рабочими ссылками)
+# FAQ (ЧАСТЫЕ ВОПРОСЫ) - НОВАЯ ФУНКЦИЯ
+# ============================================================================
+@dp.callback_query(lambda c: c.data == 'faq')
+async def faq(callback_query: types.CallbackQuery, state: FSMContext):
+    try:
+        text = (
+            f" <b>Частые вопросы</b>\n\n"
+            f"<b>1. Сколько держится эффект кератина?</b>\n"
+            f"Эффект длится 3-4 месяца при правильном уходе.\n\n"
+            f"<b>2. Нужно ли мыть голову перед процедурой?</b>\n"
+            f"Да, волосы должны быть чистыми. Если вы моете голову утром — это идеально.\n\n"
+            f"<b>3. Можно ли красить волосы после кератина?</b>\n"
+            f"Рекомендуется подождать 2 недели после процедуры.\n\n"
+            f"<b>4. Как ухаживать после процедуры?</b>\n"
+            f"Используйте безсульфатные шампуни, избегайте морской воды первые 2 недели.\n\n"
+            f"<b>5. Какие составы вы используете?</b>\n"
+            f"Профессиональные составы премиум-класса (Brazil, Japan).\n\n"
+            f"<b>6. Больно ли делать процедуру?</b>\n"
+            f"Нет, процедура комфортная. Возможно лёгкое пощипывание при нанесении состава.\n\n"
+            f"<b>7. Можно ли делать беременным?</b>\n"
+            f"Нет, беременность является противопоказанием.\n\n"
+            f"❗ <b>Есть другие вопросы?</b>\n"
+            f"Напишите мастеру: <a href='{TELEGRAM_LINK}'>{TELEGRAM_USERNAME}</a>"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📅 Записаться", callback_data="start_booking")],
+            [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
+        ])
+        keyboard = add_menu_button(keyboard)
+        
+        await send_bot_message(
+            callback_query.from_user.id,
+            callback_query.message.chat.id,
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        await safe_answer(callback_query)
+    except Exception as e:
+        logger.error(f"Ошибка FAQ: {e}")
+
+# ============================================================================
+# ОБРАБОТЧИК ОТЗЫВОВ - НОВАЯ ФУНКЦИЯ
+# ============================================================================
+@dp.callback_query(lambda c: c.data.startswith('review_'))
+async def process_review(callback_query: types.CallbackQuery, state: FSMContext):
+    try:
+        parts = callback_query.data.split('_')
+        rating = int(parts[1])
+        date_str = parts[2]
+        time_str = parts[3]
+        user_id = callback_query.from_user.id
+        
+        # Находим запись
+        data = load_data()
+        booking = None
+        for b in data.get("bookings", []):
+            if b.get("date") == date_str and b.get("time") == time_str and b.get("user_id") == user_id:
+                booking = b
+                break
+        
+        if not booking:
+            await send_bot_message(user_id, callback_query.message.chat.id, "❌ Запись не найдена.")
+            await safe_answer(callback_query)
+            return
+        
+        if rating >= 4:
+            # Хорошая оценка - просим написать отзыв
+            text = (
+                f"🎉 <b>Спасибо за высокую оценку!</b>\n\n"
+                f"Мы рады, что вам понравилось!\n\n"
+                f"Можете написать краткий отзыв о процедуре? Это поможет другим клиентам.\n\n"
+                f"<i>Или пропустите этот шаг — ваше мнение уже важно для нас! ✨</i>"
+            )
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✍️ Написать отзыв", callback_data=f"review_text_{date_str}_{time_str}")],
+                [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="review_skip")]
+            ])
+            keyboard = add_menu_button(keyboard)
+            
+            await send_bot_message(user_id, callback_query.message.chat.id, text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            # Плохая оценка - уведомляем мастера
+            service_name = booking.get("service_name", get_service_name(booking.get("service", "")))
+            
+            alert_text = (
+                f"️ <b>Низкая оценка от клиента!</b>\n\n"
+                f"👤 <b>{booking.get('name', '')}</b>\n"
+                f"📞 {booking.get('phone', '')}\n"
+                f"📅 {format_date_full_ru(date_str)} {time_str}\n"
+                f"💆‍♀️ {service_name}\n"
+                f"⭐ Оценка: {rating}/5\n\n"
+                f"Рекомендуется связаться с клиентом для уточнения ситуации."
+            )
+            
+            await send_admin_alert(alert_text)
+            
+            text = (
+                f"😔 <b>Нам жаль, что вам не понравилось.</b>\n\n"
+                f"Мастер свяжется с вами для уточнения деталей.\n\n"
+                f"Спасибо за честную оценку!"
+            )
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_menu")]
+            ])
+            
+            await send_bot_message(user_id, callback_query.message.chat.id, text, reply_markup=keyboard, parse_mode="HTML")
+        
+        await safe_answer(callback_query)
+    except Exception as e:
+        logger.error(f"Ошибка обработки отзыва: {e}")
+
+@dp.callback_query(lambda c: c.data.startswith('review_text_'))
+async def request_review_text(callback_query: types.CallbackQuery, state: FSMContext):
+    try:
+        parts = callback_query.data.split('_')
+        date_str = parts[2]
+        time_str = parts[3]
+        
+        await state.update_data(review_date=date_str, review_time=time_str)
+        await state.set_state(ReviewState.waiting_for_review_text)
+        
+        text = (
+            f"✍️ <b>Напишите ваш отзыв</b>\n\n"
+            f"Что вам понравилось? Что можно улучшить?\n\n"
+            f"<i>Ваш отзыв будет опубликован в Instagram с вашего разрешения.</i>"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=" Отмена", callback_data="review_skip")]
+        ])
+        keyboard = add_menu_button(keyboard)
+        
+        await send_bot_message(
+            callback_query.from_user.id,
+            callback_query.message.chat.id,
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        await safe_answer(callback_query)
+    except Exception as e:
+        logger.error(f"Ошибка запроса текста отзыва: {e}")
+
+@dp.message(ReviewState.waiting_for_review_text)
+async def process_review_text(message: types.Message, state: FSMContext):
+    try:
+        user_data = await state.get_data()
+        date_str = user_data.get('review_date', '')
+        time_str = user_data.get('review_time', '')
+        
+        review_text = message.text
+        
+        # Сохраняем отзыв
+        reviews = load_reviews()
+        if str(message.from_user.id) not in reviews:
+            reviews[str(message.from_user.id)] = []
+        
+        reviews[str(message.from_user.id)].append({
+            "date": datetime.now().isoformat(),
+            "booking_date": date_str,
+            "booking_time": time_str,
+            "text": review_text,
+            "rating": 5  # Предполагаем высокую оценку, раз клиент пишет отзыв
+        })
+        save_reviews(reviews)
+        
+        # Уведомляем мастера
+        alert_text = (
+            f"⭐ <b>Новый отзыв от клиента!</b>\n\n"
+            f"👤 {message.from_user.first_name}\n"
+            f"📅 {format_date_full_ru(date_str)} {time_str}\n\n"
+            f"<b>Отзыв:</b>\n{review_text}"
+        )
+        await send_admin_alert(alert_text)
+        
+        text = (
+            f"✅ <b>Спасибо за отзыв!</b>\n\n"
+            f"Ваше мнение очень важно для нас. ✨\n\n"
+            f"Мы опубликуем его в Instagram @_novakeratin"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=" В главное меню", callback_data="back_to_menu")]
+        ])
+        
+        await state.clear()
+        await send_bot_message(message.from_user.id, message.chat.id, text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Ошибка обработки текста отзыва: {e}")
+
+@dp.callback_query(lambda c: c.data == 'review_skip')
+async def skip_review(callback_query: types.CallbackQuery, state: FSMContext):
+    try:
+        await state.clear()
+        
+        text = (
+            f"✅ <b>Спасибо за оценку!</b>\n\n"
+            f"Ваше мнение важно для нас. ✨"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_menu")]
+        ])
+        
+        await send_bot_message(
+            callback_query.from_user.id,
+            callback_query.message.chat.id,
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        await safe_answer(callback_query)
+    except Exception as e:
+        logger.error(f"Ошибка пропуска отзыва: {e}")
+
+def load_reviews():
+    try:
+        filename = "reviews.json"
+        if os.path.exists(filename):
+            with open(filename, "r", encoding="utf-8") as file:
+                return json.load(file)
+        return {}
+    except:
+        return {}
+
+def save_reviews(data):
+    try:
+        filename = "reviews.json"
+        with open(filename, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Ошибка сохранения отзывов: {e}")
+
+# ============================================================================
+# ИНФОРМАЦИОННЫЕ КНОПКИ
 # ============================================================================
 @dp.callback_query(lambda c: c.data == 'about_master')
 async def about_master(callback_query: types.CallbackQuery, state: FSMContext):
@@ -671,11 +1030,11 @@ async def about_master(callback_query: types.CallbackQuery, state: FSMContext):
             f"👩‍🎨 <b>О мастере</b>\n\n"
             f"<b>Мария</b> — сертифицированный мастер реконструкции волос\n\n"
             f"✨ <b>Опыт работы:</b> более 3 лет\n"
-            f"🎓 <b>Образование:</b> профессиональные курсы по кератиновому выпрямлению и восстановлению волос\n"
+            f" <b>Образование:</b> профессиональные курсы по кератиновому выпрямлению и восстановлению волос\n"
             f"💎 <b>Специализация:</b> все виды реконструкции волос\n\n"
             f"📸 <b>Портфолио работ:</b>\n<a href='{TELEGRAM_LINK}'>{TELEGRAM_USERNAME}</a>\n\n"
-            f"📍 <b>Адрес:</b> ул. Матросова, 39, 1 этаж (Жлобин)\n"
-            f"⏰ <b>Время работы:</b> Суббота и Воскресенье, 9:00-17:00"
+            f" <b>Адрес:</b> ул. Матросова, 39, 1 этаж (Жлобин)\n"
+            f" <b>Время работы:</b> Суббота и Воскресенье, 9:00-17:00"
         )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -799,7 +1158,7 @@ async def how_to_get(callback_query: types.CallbackQuery, state: FSMContext):
         logger.error(f"Ошибка 'Как добраться': {e}")
 
 # ============================================================================
-# АДМИН-ПАНЕЛЬ
+# АДМИН-ПАНЕЛЬ (с статистикой)
 # ============================================================================
 @dp.callback_query(lambda c: c.data == 'admin_panel')
 async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
@@ -819,6 +1178,7 @@ async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
             )
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
                 [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_menu")]
             ])
             
@@ -860,7 +1220,7 @@ async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
                     end_time = "??:??"
                 
                 text += (
-                    f"  ⏰ {b.get('time', '')} — {end_time}\n"
+                    f"   {b.get('time', '')} — {end_time}\n"
                     f"  👤 {b.get('name', 'Неизвестно')}\n"
                     f"  📞 {b.get('phone', '')}\n"
                     f"  💆‍♀️ {service_name}\n\n"
@@ -874,7 +1234,8 @@ async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
                     )
                 ])
             
-            keyboard_buttons.append([InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_menu")])
+            keyboard_buttons.append([InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")])
+            keyboard_buttons.append([InlineKeyboardButton(text=" В главное меню", callback_data="back_to_menu")])
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
             await send_bot_message(
@@ -888,6 +1249,91 @@ async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
         await safe_answer(callback_query)
     except Exception as e:
         logger.error(f"Ошибка админ-панели: {e}")
+
+# ============================================================================
+# СТАТИСТИКА ДЛЯ МАСТЕРА - НОВАЯ ФУНКЦИЯ
+# ============================================================================
+@dp.callback_query(lambda c: c.data == 'admin_stats')
+async def admin_stats(callback_query: types.CallbackQuery, state: FSMContext):
+    try:
+        if callback_query.from_user.id != ADMIN_ID:
+            await safe_answer(callback_query, "⛔ Только для мастера", show_alert=True)
+            return
+        
+        data = load_data()
+        bookings = data.get("bookings", [])
+        
+        if not bookings:
+            text = (
+                f"📊 <b>Статистика</b>\n\n"
+                f"<i>Пока нет данных для статистики</i>\n\n"
+                f"Статистика появится после первых записей."
+            )
+        else:
+            now = datetime.now()
+            
+            # Статистика за неделю
+            week_ago = now - timedelta(days=7)
+            week_bookings = [b for b in bookings if datetime.strptime(f"{b.get('date', '')} {b.get('time', '')}", "%Y-%m-%d %H:%M") >= week_ago]
+            
+            # Статистика за месяц
+            month_ago = now - timedelta(days=30)
+            month_bookings = [b for b in bookings if datetime.strptime(f"{b.get('date', '')} {b.get('time', '')}", "%Y-%m-%d %H:%M") >= month_ago]
+            
+            # Подсчёт по услугам
+            service_counts = {}
+            service_revenue = {}
+            for b in bookings:
+                service = b.get("service", "")
+                service_name = get_service_name(service)
+                price = get_service_price(service)
+                
+                service_counts[service_name] = service_counts.get(service_name, 0) + 1
+                service_revenue[service_name] = service_revenue.get(service_name, 0) + price
+            
+            # Общая выручка
+            total_revenue = sum(get_service_price(b.get("service", "")) for b in bookings)
+            week_revenue = sum(get_service_price(b.get("service", "")) for b in week_bookings)
+            month_revenue = sum(get_service_price(b.get("service", "")) for b in month_bookings)
+            
+            # Уникальные клиенты
+            unique_clients = len(set(b.get("user_id") for b in bookings))
+            
+            text = (
+                f" <b>Статистика</b>\n\n"
+                f"<b> За неделю:</b>\n"
+                f"  Записей: {len(week_bookings)}\n"
+                f"  Выручка: {week_revenue} BYN\n\n"
+                f"<b>📅 За месяц:</b>\n"
+                f"  Записей: {len(month_bookings)}\n"
+                f"  Выручка: {month_revenue} BYN\n\n"
+                f"<b>📈 Всего:</b>\n"
+                f"  Записей: {len(bookings)}\n"
+                f"  Выручка: {total_revenue} BYN\n"
+                f"  Клиентов: {unique_clients}\n\n"
+                f"<b> Популярные услуги:</b>\n"
+            )
+            
+            sorted_services = sorted(service_counts.items(), key=lambda x: x[1], reverse=True)
+            for service_name, count in sorted_services[:3]:
+                revenue = service_revenue[service_name]
+                text += f"  {service_name}: {count} ({revenue} BYN)\n"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel")]
+        ])
+        keyboard = add_menu_button(keyboard)
+        
+        await send_bot_message(
+            callback_query.from_user.id,
+            callback_query.message.chat.id,
+            text,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+        await safe_answer(callback_query)
+    except Exception as e:
+        logger.error(f"Ошибка статистики: {e}")
 
 @dp.callback_query(lambda c: c.data.startswith('admin_cancel_'))
 async def admin_cancel_booking(callback_query: types.CallbackQuery, state: FSMContext):
@@ -951,7 +1397,6 @@ async def back_to_menu(callback_query: types.CallbackQuery, state: FSMContext):
         user_id = callback_query.from_user.id
         chat_id = callback_query.message.chat.id
         
-        # Удаляем текущее сообщение
         try:
             await callback_query.message.delete()
             if user_id in user_messages and callback_query.message.message_id in user_messages[user_id]:
@@ -961,12 +1406,8 @@ async def back_to_menu(callback_query: types.CallbackQuery, state: FSMContext):
             pass
         
         await state.clear()
-        
-        # Показываем меню (оно добавится в список user_messages)
         await show_main_menu(callback_query)
         
-        # Теперь удаляем все остальные сообщения, КРОМЕ только что показанного меню
-        # Получаем ID последнего сообщения (меню)
         if user_id in user_messages and len(user_messages[user_id]) > 0:
             menu_message_id = user_messages[user_id][-1]
             await cleanup_previous_messages(user_id, chat_id, keep_message_id=menu_message_id)
@@ -974,7 +1415,7 @@ async def back_to_menu(callback_query: types.CallbackQuery, state: FSMContext):
         logger.error(f"Ошибка возврата в меню: {e}")
 
 # ============================================================================
-# НАЧАЛО ЗАПИСИ
+# НАЧАЛО ЗАПИСИ (с программой лояльности)
 # ============================================================================
 @dp.callback_query(lambda c: c.data == 'start_booking')
 async def process_start_booking(callback_query: types.CallbackQuery, state: FSMContext):
@@ -999,10 +1440,18 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
             )
             await state.set_state(BookingState.waiting_for_service)
             
+            # Получаем информацию о скидке
+            discount = get_user_discount(user_id)
+            visits = get_user_visits(user_id)
+            
+            discount_text = ""
+            if discount > 0:
+                discount_text = f"\n <b>Ваша скидка: {discount}%</b> (визитов: {visits})"
+            
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="️ Холодное восстановление — 80 BYN", callback_data="service_cold_restoration")],
+                [InlineKeyboardButton(text="❄️ Холодное восстановление — 80 BYN", callback_data="service_cold_restoration")],
                 [InlineKeyboardButton(text="✨ Кератин / Ботокс — 150 BYN", callback_data="service_keratin_botox")],
-                [InlineKeyboardButton(text="💎 Тотальная реконструкция — 200 BYN", callback_data="service_total_reconstruction")],
+                [InlineKeyboardButton(text=" Тотальная реконструкция — 200 BYN", callback_data="service_total_reconstruction")],
                 [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
             ])
             keyboard = add_menu_button(keyboard)
@@ -1010,7 +1459,7 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
             await send_bot_message(
                 user_id,
                 chat_id,
-                f"✅ С возвращением, <b>{verified_user['name']}</b>!\n\nВыберите услугу:",
+                f"✅ С возвращением, <b>{verified_user['name']}</b>!{discount_text}\n\nВыберите услугу:",
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
@@ -1029,7 +1478,7 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
             await send_bot_message(
                 user_id,
                 chat_id,
-                f"📅 <b>Запись на процедуру</b>\n\n"
+                f" <b>Запись на процедуру</b>\n\n"
                 f"Для записи необходимо подтвердить номер телефона.\n\n"
                 f"Нажмите кнопку <b>«📱 Поделиться контактом»</b> ниже.\n\n"
                 f"<i>Это нужно один раз. В будущем подтверждать не потребуется.</i>",
@@ -1064,7 +1513,7 @@ async def process_contact(message: types.Message, state: FSMContext):
             await send_bot_message(
                 user_id,
                 chat_id,
-                "❌ Пожалуйста, нажмите кнопку «📱 Поделиться контактом» для подтверждения номера телефона."
+                " Пожалуйста, нажмите кнопку «📱 Поделиться контактом» для подтверждения номера телефона."
             )
             return
         
@@ -1174,7 +1623,7 @@ async def process_service(callback_query: types.CallbackQuery, state: FSMContext
         await send_bot_message(
             user_id,
             callback_query.message.chat.id,
-            f" <b>{service_name}</b>\n\n💡 Мастер работает только по выходным!\n\nВыберите дату:",
+            f"📅 <b>{service_name}</b>\n\n💡 Мастер работает только по выходным!\n\nВыберите дату:",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
@@ -1217,7 +1666,7 @@ async def process_date(callback_query: types.CallbackQuery, state: FSMContext):
         for time_str in sorted(free_times):
             keyboard_buttons.append([InlineKeyboardButton(text=time_str, callback_data=f"time_{time_str}")])
         
-        keyboard_buttons.append([InlineKeyboardButton(text=" Назад", callback_data="back_to_menu")])
+        keyboard_buttons.append([InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         keyboard = add_menu_button(keyboard)
@@ -1233,7 +1682,7 @@ async def process_date(callback_query: types.CallbackQuery, state: FSMContext):
         logger.error(f"Ошибка выбора даты: {e}")
 
 # ============================================================================
-# ВЫБОР ВРЕМЕНИ
+# ВЫБОР ВРЕМЕНИ (с программой лояльности)
 # ============================================================================
 @dp.callback_query(lambda c: c.data.startswith('time_'))
 async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
@@ -1252,6 +1701,16 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
         service_name = get_service_name(service_code)
         price = get_service_price(service_code)
         
+        # Увеличиваем счётчик посещений
+        user_id = callback_query.from_user.id
+        visits = increment_user_visits(user_id)
+        discount = get_user_discount(user_id)
+        
+        # Применяем скидку
+        final_price = price
+        if discount > 0:
+            final_price = int(price * (100 - discount) / 100)
+        
         async with booking_lock:
             data = load_data()
             
@@ -1259,7 +1718,7 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
                 await send_bot_message(
                     callback_query.from_user.id,
                     callback_query.message.chat.id,
-                    "⏰ К сожалению, этот слот только что заняли. Пожалуйста, выберите другое время."
+                    " К сожалению, этот слот только что заняли. Пожалуйста, выберите другое время."
                 )
                 await safe_answer(callback_query)
                 return
@@ -1282,7 +1741,10 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
                 "notified_about_earlier_slot": False,
                 "reminded_24h": False,
                 "reminded_2h": False,
-                "admin_reminded_2h": False
+                "admin_reminded_2h": False,
+                "review_requested": False,
+                "discount_applied": discount,
+                "final_price": final_price
             }
             data["bookings"].append(new_booking)
             save_data(data)
@@ -1290,12 +1752,15 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
         admin_text = (
             f"🔔 <b>Новая запись</b>\n\n"
             f"👤 <b>{user_data.get('name', '')}</b>\n"
-            f" {user_data.get('phone', '')}\n"
+            f"📞 {user_data.get('phone', '')}\n"
             f"📅 {format_date_full_ru(date_str)}\n"
-            f" {time_str}\n"
+            f"⏰ {time_str}\n"
             f"💆‍♀️ {service_name}\n"
-            f"💰 {price} BYN"
+            f"💰 {final_price} BYN"
         )
+        if discount > 0:
+            admin_text += f"\n🎁 Скидка: {discount}% (визит #{visits})"
+        
         await send_admin_notification(admin_text)
         
         date_display = format_date_full_ru(date_str)
@@ -1307,22 +1772,28 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
             end_min -= 60
         end_time = f"{end_hour:02d}:{end_min:02d}"
         
+        discount_info = ""
+        if discount > 0:
+            discount_info = f"\n <b>Применена скидка {discount}%!</b>\n💰 Итого: {final_price} BYN (вместо {price} BYN)"
+        else:
+            discount_info = f"\n💰 {price} BYN"
+        
         final_message = (
             f"✅ <b>Запись подтверждена!</b>\n\n"
             f"Отлично, <b>{user_data.get('name', '')}</b>! ✨\n\n"
             f"Вы записаны на:\n"
             f"💆‍♀️ {service_name}\n\n"
-            f" {date_display}\n"
+            f"📅 {date_display}\n"
             f"⏰ {time_str} — {end_time}\n"
-            f"💰 {price} BYN\n\n"
-            f"📍 <b>Адрес:</b>\nул. Матросова, 39, 1 этаж\n(напротив Светофор, Мастак)\n\n"
+            f"{discount_info}\n\n"
+            f" <b>Адрес:</b>\nул. Матросова, 39, 1 этаж\n(напротив Светофор, Мастак)\n\n"
             f"📞 <b>Контакты:</b>\n<a href='{TELEGRAM_LINK}'>{TELEGRAM_USERNAME}</a>\n\n"
             f"🔔 Мы напомним вам о записи за 24 часа до визита.\n\n"
             f"<i>Ждём вас! ✨</i>"
         )
         
         final_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_menu")]
+            [InlineKeyboardButton(text=" В главное меню", callback_data="back_to_menu")]
         ])
         
         await state.clear()
@@ -1338,7 +1809,7 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
         logger.error(f"Ошибка выбора времени: {e}")
 
 # ============================================================================
-# МОИ ЗАПИСИ
+# МОИ ЗАПИСИ (с программой лояльности)
 # ============================================================================
 @dp.callback_query(lambda c: c.data == 'my_bookings')
 async def show_my_bookings(callback_query: types.CallbackQuery, state: FSMContext):
@@ -1348,8 +1819,14 @@ async def show_my_bookings(callback_query: types.CallbackQuery, state: FSMContex
         data = load_data()
         user_bookings = [b for b in data.get("bookings", []) if b.get("user_id") == user_id]
         
+        # Получаем информацию о лояльности
+        visits = get_user_visits(user_id)
+        discount = get_user_discount(user_id)
+        loyalty_message = get_discount_message(user_id)
+        
         if not user_bookings:
-            await send_bot_message(user_id, callback_query.message.chat.id, "У вас нет активных записей.")
+            text = f"У вас нет активных записей.\n\n{loyalty_message}"
+            await send_bot_message(user_id, callback_query.message.chat.id, text, parse_mode="HTML")
             await show_main_menu(callback_query)
             await safe_answer(callback_query)
             return
@@ -1362,7 +1839,7 @@ async def show_my_bookings(callback_query: types.CallbackQuery, state: FSMContex
             date_display = format_date_full_ru(b.get("date", ""))
             service_name = b.get("service_name", get_service_name(b.get("service", "")))
             duration = get_service_duration(b.get("service", ""))
-            price = get_service_price(b.get("service", ""))
+            price = b.get("final_price", get_service_price(b.get("service", "")))
             
             try:
                 sh, sm = map(int, b.get("time", "00:00").split(':'))
@@ -1382,7 +1859,7 @@ async def show_my_bookings(callback_query: types.CallbackQuery, state: FSMContex
                 f"  💰 {price} BYN\n\n"
             )
         
-        bookings_text += f"<i>Управление записями доступно в главном меню</i>"
+        bookings_text += f"{THIN_DIVIDER}\n{loyalty_message}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ Отменить запись", callback_data="cancel_booking")],
@@ -1460,7 +1937,7 @@ async def confirm_cancellation(callback_query: types.CallbackQuery, state: FSMCo
             f"⚠️ <b>Отмена записи</b>\n\n"
             f"👤 <b>{booking_to_cancel.get('name', '')}</b>\n"
             f"📅 {format_date_full_ru(date_str)}\n"
-            f" {time_str}\n"
+            f"⏰ {time_str}\n"
             f"💆‍♀️ {booking_to_cancel.get('service_name', get_service_name(booking_to_cancel.get('service', '')))}"
         )
         await send_admin_notification(admin_cancel_text)
@@ -1495,7 +1972,7 @@ async def notify_clients_about_earlier_slot(date_str, time_str):
                 message_text = f"🎉 Освободилось время на {date_display}:\n⏰ {time_str}\n\nВы записаны на {b.get('time', '')}. Хотите перенести?"
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="✅ Да, перенести", callback_data=f"reschedule_{date_str}_{time_str}_{b.get('date', '')}_{b.get('time', '')}")],
-                    [InlineKeyboardButton(text="❌ Нет", callback_data="no_reschedule")]
+                    [InlineKeyboardButton(text=" Нет", callback_data="no_reschedule")]
                 ])
                 await safe_send_message(b["user_id"], message_text, reply_markup=keyboard)
                 b["notified_about_earlier_slot"] = True
@@ -1521,7 +1998,7 @@ async def reschedule_booking(callback_query: types.CallbackQuery, state: FSMCont
                 await send_bot_message(
                     user_id,
                     callback_query.message.chat.id,
-                    " Это время только что заняли. Ваша запись остаётся без изменений."
+                    "⏰ Это время только что заняли. Ваша запись остаётся без изменений."
                 )
                 await show_main_menu(callback_query)
                 await safe_answer(callback_query)
@@ -1642,12 +2119,12 @@ async def main():
         logger.info("Задача напоминаний запущена")
         
         logger.info("✅ Бот успешно запущен!")
-        logger.info(f"👨‍💼 ADMIN_ID: {ADMIN_ID}")
+        logger.info(f"👨💼 ADMIN_ID: {ADMIN_ID}")
         logger.info("Нажмите Ctrl+C для остановки")
         
         await dp.start_polling(bot)
     except KeyboardInterrupt:
-        logger.info(" Бот остановлен пользователем")
+        logger.info("👋 Бот остановлен пользователем")
     except Exception as e:
         logger.error(f"Критическая ошибка в main: {e}", exc_info=True)
     finally:
@@ -1663,5 +2140,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n👋 Бот остановлен")
     except Exception as e:
-        print(f"❌ Критическая ошибка: {e}")
+        print(f" Критическая ошибка: {e}")
         logging.error(f"Критическая ошибка при запуске: {e}", exc_info=True)
