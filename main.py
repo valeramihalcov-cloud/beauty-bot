@@ -5,7 +5,12 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, MenuButtonCommands, KeyboardButtonRequestContact
+from aiogram.types import (
+    InlineKeyboardMarkup, InlineKeyboardButton, 
+    MenuButtonCommands,
+    KeyboardButton, ReplyKeyboardMarkup,
+    ReplyKeyboardRemove
+)
 from aiogram.exceptions import TelegramBadRequest
 from aiohttp import web
 import json
@@ -319,7 +324,6 @@ def get_available_times_for_service(date_str, schedule, existing_bookings, servi
 # РАБОТА С ВЕРИФИЦИРОВАННЫМИ ПОЛЬЗОВАТЕЛЯМИ
 # ============================================================================
 def load_verified_users():
-    """Загружает базу верифицированных пользователей"""
     try:
         filename = "verified_users.json"
         if os.path.exists(filename):
@@ -332,7 +336,6 @@ def load_verified_users():
         return {}
 
 def save_verified_user(user_id, name, phone):
-    """Сохраняет верифицированного пользователя"""
     try:
         filename = "verified_users.json"
         verified_users = load_verified_users()
@@ -349,7 +352,6 @@ def save_verified_user(user_id, name, phone):
         return False
 
 def get_verified_user(user_id):
-    """Получает данные верифицированного пользователя"""
     verified_users = load_verified_users()
     return verified_users.get(str(user_id))
 
@@ -367,7 +369,6 @@ async def send_admin_notification(text):
         logger.error(f"Ошибка отправки уведомления мастеру: {e}")
 
 async def send_admin_alert(text):
-    """Отправляет важное уведомление мастеру (без кнопки меню)"""
     try:
         await safe_send_message(ADMIN_ID, text, parse_mode="HTML")
         logger.info("Важное уведомление отправлено мастеру")
@@ -392,15 +393,27 @@ async def show_main_menu(message_or_callback):
         [InlineKeyboardButton(text="📋 Мои записи", callback_data="my_bookings")],
         [InlineKeyboardButton(text="👩‍🎨 О мастере", callback_data="about_master")],
         [InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")],
-        [InlineKeyboardButton(text=" Противопоказания", callback_data="contraindications_info")],
-        [InlineKeyboardButton(text=" Как добраться", callback_data="how_to_get")]
+        [InlineKeyboardButton(text="❗ Противопоказания", callback_data="contraindications_info")],
+        [InlineKeyboardButton(text="📍 Как добраться", callback_data="how_to_get")]
     ])
+    
+    # Для мастера добавляем кнопку панели
+    if isinstance(message_or_callback, types.CallbackQuery):
+        if message_or_callback.from_user.id == ADMIN_ID:
+            keyboard.inline_keyboard.append([
+                InlineKeyboardButton(text="👨‍💼 Панель мастера", callback_data="admin_panel")
+            ])
+    elif isinstance(message_or_callback, types.Message):
+        if message_or_callback.from_user.id == ADMIN_ID:
+            keyboard.inline_keyboard.append([
+                InlineKeyboardButton(text="👨‍💼 Панель мастера", callback_data="admin_panel")
+            ])
     
     text = (
         f"✨ <b>Добро пожаловать в Nova Keratin!</b>\n\n"
-        f"‍🎨 <b>Мастер Мария</b>\n"
-        f" Жлобин, ул. Матросова, 39\n"
-        f" Работаю Сб-Вс, 9:00-17:00\n\n"
+        f"👩‍🎨 <b>Мастер Мария</b>\n"
+        f"📍 Жлобин, ул. Матросова, 39\n"
+        f"⏰ Работаю Сб-Вс, 9:00-17:00\n\n"
         f"Выберите действие:"
     )
     
@@ -541,7 +554,7 @@ async def send_client_reminder(booking):
         
         await safe_send_message(booking["user_id"], text, parse_mode="HTML")
     except Exception as e:
-        logger.error(f" Ошибка напоминания: {e}")
+        logger.error(f"❌ Ошибка напоминания: {e}")
 
 async def send_admin_reminder(booking):
     try:
@@ -560,8 +573,8 @@ async def send_admin_reminder(booking):
         text = (
             f"⏰ <b>Скоро запись</b>\n\n"
             f"Через 2 часа:\n\n"
-            f" <b>{booking.get('name', 'Неизвестно')}</b>\n"
-            f" {booking.get('phone', '')}\n"
+            f"👤 <b>{booking.get('name', 'Неизвестно')}</b>\n"
+            f"📞 {booking.get('phone', '')}\n"
             f"📅 {date_display}\n"
             f"⏰ {booking.get('time', '')} — {end_time}\n"
             f"💆‍♀️ {service_name}\n\n"
@@ -586,15 +599,15 @@ async def about_master(callback_query: types.CallbackQuery, state: FSMContext):
             f"👩‍🎨 <b>О мастере</b>\n\n"
             f"<b>Мария</b> — сертифицированный мастер реконструкции волос\n\n"
             f"✨ <b>Опыт работы:</b> более 3 лет\n"
-            f" <b>Образование:</b> профессиональные курсы по кератиновому выпрямлению и восстановлению волос\n"
+            f"🎓 <b>Образование:</b> профессиональные курсы по кератиновому выпрямлению и восстановлению волос\n"
             f"💎 <b>Специализация:</b> все виды реконструкции волос\n\n"
-            f" <b>Портфолио работ:</b>\n@_novakeratin\n\n"
+            f"📸 <b>Портфолио работ:</b>\n@_novakeratin\n\n"
             f"📍 <b>Адрес:</b> ул. Матросова, 39, 1 этаж (Жлобин)\n"
             f"⏰ <b>Время работы:</b> Суббота и Воскресенье, 9:00-17:00"
         )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=" Назад", callback_data="back_to_menu")]
+            [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
         ])
         
         await send_bot_message(
@@ -710,7 +723,7 @@ async def how_to_get(callback_query: types.CallbackQuery, state: FSMContext):
         logger.error(f"Ошибка 'Как добраться': {e}")
 
 # ============================================================================
-# АДМИН-ПАНЕЛЬ С ВОЗМОЖНОСТЬЮ ОТМЕНЫ ЗАПИСЕЙ
+# АДМИН-ПАНЕЛЬ
 # ============================================================================
 @dp.callback_query(lambda c: c.data == 'admin_panel')
 async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
@@ -754,7 +767,7 @@ async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
             for b in sorted_bookings:
                 if b.get("date") != current_date:
                     current_date = b.get("date")
-                    text += f"<b> {format_date_full_ru(current_date)}</b>\n{THIN_DIVIDER}\n"
+                    text += f"<b>▸ {format_date_full_ru(current_date)}</b>\n{THIN_DIVIDER}\n"
                 
                 service_name = b.get("service_name", get_service_name(b.get("service", "")))
                 duration = get_service_duration(b.get("service", ""))
@@ -774,10 +787,9 @@ async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
                     f"  ⏰ {b.get('time', '')} — {end_time}\n"
                     f"  👤 {b.get('name', 'Неизвестно')}\n"
                     f"  📞 {b.get('phone', '')}\n"
-                    f"  ‍♀️ {service_name}\n\n"
+                    f"  💆‍♀️ {service_name}\n\n"
                 )
                 
-                # Добавляем кнопку отмены для каждой записи
                 callback_data = f"admin_cancel_{b.get('date', '')}_{b.get('time', '')}"
                 keyboard_buttons.append([
                     InlineKeyboardButton(
@@ -803,10 +815,9 @@ async def admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(lambda c: c.data.startswith('admin_cancel_'))
 async def admin_cancel_booking(callback_query: types.CallbackQuery, state: FSMContext):
-    """Отмена записи мастером из админ-панели"""
     try:
         if callback_query.from_user.id != ADMIN_ID:
-            await safe_answer(callback_query, " Только для мастера", show_alert=True)
+            await safe_answer(callback_query, "⛔ Только для мастера", show_alert=True)
             return
         
         parts = callback_query.data.split('_')
@@ -830,20 +841,20 @@ async def admin_cancel_booking(callback_query: types.CallbackQuery, state: FSMCo
             await safe_answer(callback_query)
             return
         
-        # Удаляем запись
         data["bookings"].remove(booking_to_cancel)
         if date_str in data["schedule"]:
             data["schedule"][date_str][time_str] = "free"
         save_data(data)
         
-        # Уведомляем клиента
         date_display = format_date_full_ru(date_str)
-        await safe_send_message(
-            booking_to_cancel["user_id"],
-            f"⚠️ Ваша запись на {date_display} в {time_str} была отменена мастером.\n\nПриносим извинения за неудобства. Пожалуйста, свяжитесь с мастером для уточнения деталей: @_novakeratin"
-        )
+        try:
+            await safe_send_message(
+                booking_to_cancel["user_id"],
+                f"⚠️ Ваша запись на {date_display} в {time_str} была отменена мастером.\n\nПриносим извинения за неудобства. Пожалуйста, свяжитесь с мастером для уточнения деталей: @_novakeratin"
+            )
+        except Exception as e:
+            logger.error(f"Не удалось уведомить клиента об отмене: {e}")
         
-        # Показываем обновлённую панель
         await send_bot_message(
             callback_query.from_user.id,
             callback_query.message.chat.id,
@@ -851,15 +862,17 @@ async def admin_cancel_booking(callback_query: types.CallbackQuery, state: FSMCo
         )
         
         # Перезагружаем админ-панель
+        await callback_query.message.delete()
         await admin_panel(callback_query, state)
         
-        await safe_answer(callback_query)
+        await safe_answer(callback_query, "Запись отменена")
     except Exception as e:
         logger.error(f"Ошибка отмены записи мастером: {e}")
 
 @dp.callback_query(lambda c: c.data == 'back_to_menu')
 async def back_to_menu(callback_query: types.CallbackQuery, state: FSMContext):
     try:
+        await state.clear()
         await show_main_menu(callback_query)
     except Exception as e:
         logger.error(f"Ошибка возврата в меню: {e}")
@@ -871,12 +884,10 @@ async def back_to_menu(callback_query: types.CallbackQuery, state: FSMContext):
 async def process_start_booking(callback_query: types.CallbackQuery, state: FSMContext):
     try:
         user_id = callback_query.from_user.id
-        
-        # Проверяем, верифицирован ли пользователь
         verified_user = get_verified_user(user_id)
         
         if verified_user:
-            # Пользователь уже верифицирован - сразу переходим к выбору услуги
+            # Пользователь уже верифицирован
             await state.update_data(
                 name=verified_user["name"],
                 phone=verified_user["phone"]
@@ -898,22 +909,27 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
                 parse_mode="HTML"
             )
         else:
-            # Пользователь не верифицирован - запрашиваем контакт
+            # Пользователь не верифицирован - запрашиваем контакт через ОБЫЧНУЮ клавиатуру
             await state.set_state(BookingState.waiting_for_contact)
             
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📱 Поделиться контактом", request_contact=True)],
-                [InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")]
-            ])
+            # ⚠️ ВАЖНО: Используем ReplyKeyboardMarkup + KeyboardButton, а не InlineKeyboardButton!
+            contact_keyboard = ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="📱 Поделиться контактом", request_contact=True)],
+                    [KeyboardButton(text="❌ Отмена")]
+                ],
+                resize_keyboard=True,
+                one_time_keyboard=True
+            )
             
             await send_bot_message(
                 callback_query.from_user.id,
                 callback_query.message.chat.id,
                 f"📅 <b>Запись на процедуру</b>\n\n"
-                f"Для записи необходимо подтвердить номер телефона.\n"
-                f"Нажмите кнопку ниже, чтобы поделиться контактом из вашего профиля Telegram.\n\n"
+                f"Для записи необходимо подтвердить номер телефона.\n\n"
+                f"Нажмите кнопку <b>«📱 Поделиться контактом»</b> ниже.\n\n"
                 f"<i>Это нужно один раз. В будущем подтверждать не потребуется.</i>",
-                reply_markup=keyboard,
+                reply_markup=contact_keyboard,
                 parse_mode="HTML"
             )
         
@@ -925,17 +941,26 @@ async def process_start_booking(callback_query: types.CallbackQuery, state: FSMC
 async def process_contact(message: types.Message, state: FSMContext):
     """Обработка полученного контакта"""
     try:
+        # Убираем обычную клавиатуру
+        await message.answer("...", reply_markup=ReplyKeyboardRemove())
+        
+        # Проверяем, не нажал ли пользователь "Отмена"
+        if message.text and "Отмена" in message.text:
+            await state.clear()
+            await show_main_menu(message)
+            return
+        
         if not message.contact:
             await send_bot_message(
                 message.from_user.id,
                 message.chat.id,
-                "❌ Пожалуйста, нажмите кнопку «Поделиться контактом» для подтверждения номера телефона."
+                "❌ Пожалуйста, нажмите кнопку «📱 Поделиться контактом» для подтверждения номера телефона."
             )
             return
         
         contact = message.contact
         phone = contact.phone_number
-        name = contact.first_name
+        name = contact.first_name or "Клиент"
         
         if contact.last_name:
             name = f"{contact.first_name} {contact.last_name}"
@@ -956,7 +981,7 @@ async def process_contact(message: types.Message, state: FSMContext):
         await send_bot_message(
             message.from_user.id,
             message.chat.id,
-            f"✅ Принял: {name}, {phone}\n\nВыберите услугу:",
+            f"✅ Спасибо, <b>{name}</b>!\nНомер {phone} подтверждён.\n\nВыберите услугу:",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
@@ -964,7 +989,7 @@ async def process_contact(message: types.Message, state: FSMContext):
         logger.error(f"Ошибка обработки контакта: {e}")
 
 # ============================================================================
-# ВЫБОР УСЛУГИ С ПРОВЕРКОЙ МНОЖЕСТВЕННЫХ ЗАПИСЕЙ
+# ВЫБОР УСЛУГИ
 # ============================================================================
 @dp.callback_query(lambda c: c.data.startswith('service_'))
 async def process_service(callback_query: types.CallbackQuery, state: FSMContext):
@@ -973,7 +998,6 @@ async def process_service(callback_query: types.CallbackQuery, state: FSMContext
         await state.update_data(service=service_code)
         await state.set_state(BookingState.waiting_for_date)
         
-        # Проверяем количество активных записей пользователя
         user_id = callback_query.from_user.id
         data = load_data()
         user_bookings = [b for b in data.get("bookings", []) if b.get("user_id") == user_id]
@@ -993,7 +1017,6 @@ async def process_service(callback_query: types.CallbackQuery, state: FSMContext
             
             await send_admin_alert(alert_text)
         
-        # Показываем доступные даты
         schedule = data.get("schedule", {})
         existing_bookings = data.get("bookings", [])
         
@@ -1032,7 +1055,7 @@ async def process_service(callback_query: types.CallbackQuery, state: FSMContext
             except:
                 continue
         
-        keyboard_buttons.append([InlineKeyboardButton(text=" Назад", callback_data="back_to_menu")])
+        keyboard_buttons.append([InlineKeyboardButton(text="◂ Назад", callback_data="back_to_menu")])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         service_name = get_service_name(service_code)
@@ -1152,12 +1175,11 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
             data["bookings"].append(new_booking)
             save_data(data)
         
-        # Уведомление мастеру о новой записи
         admin_text = (
-            f" <b>Новая запись</b>\n\n"
+            f"🔔 <b>Новая запись</b>\n\n"
             f"👤 <b>{user_data.get('name', '')}</b>\n"
             f"📞 {user_data.get('phone', '')}\n"
-            f" {format_date_full_ru(date_str)}\n"
+            f"📅 {format_date_full_ru(date_str)}\n"
             f"⏰ {time_str}\n"
             f"💆‍♀️ {service_name}\n"
             f"💰 {price} BYN"
@@ -1183,7 +1205,7 @@ async def process_time(callback_query: types.CallbackQuery, state: FSMContext):
             f"💰 {price} BYN\n\n"
             f"📍 <b>Адрес:</b>\nул. Матросова, 39, 1 этаж\n(напротив Светофор, Мастак)\n\n"
             f"📞 <b>Контакты:</b>\nInstagram: @_novakeratin\n\n"
-            f" Мы напомним вам о записи за 24 часа до визита.\n\n"
+            f"🔔 Мы напомним вам о записи за 24 часа до визита.\n\n"
             f"<i>Ждём вас! ✨</i>"
         )
         
@@ -1239,8 +1261,8 @@ async def show_my_bookings(callback_query: types.CallbackQuery, state: FSMContex
             
             bookings_text += (
                 f"<b>▸ {date_display}</b>\n"
-                f"   {b.get('time', '')} — {end_time}\n"
-                f"  💆♀️ {service_name}\n"
+                f"  ⏰ {b.get('time', '')} — {end_time}\n"
+                f"  💆‍♀️ {service_name}\n"
                 f"  💰 {price} BYN\n\n"
             )
         
@@ -1319,7 +1341,7 @@ async def confirm_cancellation(callback_query: types.CallbackQuery, state: FSMCo
             f"⚠️ <b>Отмена записи</b>\n\n"
             f"👤 <b>{booking_to_cancel.get('name', '')}</b>\n"
             f"📅 {format_date_full_ru(date_str)}\n"
-            f" {time_str}\n"
+            f"⏰ {time_str}\n"
             f"💆‍♀️ {booking_to_cancel.get('service_name', get_service_name(booking_to_cancel.get('service', '')))}"
         )
         await send_admin_notification(admin_cancel_text)
@@ -1451,6 +1473,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
 async def show_menu_on_any_message(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     
+    # Если пользователь в процессе верификации - не перехватываем
     if current_state is not None:
         return
     
@@ -1501,7 +1524,7 @@ async def main():
         
         await dp.start_polling(bot)
     except KeyboardInterrupt:
-        logger.info(" Бот остановлен пользователем")
+        logger.info("👋 Бот остановлен пользователем")
     except Exception as e:
         logger.error(f"Критическая ошибка в main: {e}", exc_info=True)
     finally:
