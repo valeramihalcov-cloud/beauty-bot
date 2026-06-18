@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # НАСТРОЙКИ
 # ============================================================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-ADMIN_ID = 1439539656
+ADMIN_ID = 5023137327
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
